@@ -156,7 +156,7 @@ namespace Npgsql.BackendMessages
         )
         {
             _typeHandlerRegistry = typeHandlerRegistry;
-            Name = name;
+            Name = name.ToUpperInvariant();
             TableOID = tableOID;
             ColumnAttributeNumber = columnAttributeNumber;
             TypeOID = oid;
