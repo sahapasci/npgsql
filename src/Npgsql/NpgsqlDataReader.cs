@@ -1341,7 +1341,7 @@ namespace Npgsql
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        T ReadColumn<T>(int ordinal) => ReadColumn<T>(ordinal, true).Result;
+        T ReadColumn<T>(int ordinal) => ReadColumn<T>(ordinal, false).Result;
 
         #region New (CoreCLR) schema API
 
@@ -1402,7 +1402,7 @@ namespace Npgsql
             {
                 var row = table.NewRow();
 
-                row["AllowDBNull"] = column.AllowDBNull == true;
+                row["AllowDBNull"] = column.AllowDBNull;
                 row["BaseColumnName"] = column.BaseColumnName;
                 row["BaseCatalogName"] = column.BaseCatalogName;
                 row["BaseSchemaName"] = column.BaseSchemaName;
