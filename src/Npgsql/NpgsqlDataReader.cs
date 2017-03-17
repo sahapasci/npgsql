@@ -1402,7 +1402,7 @@ namespace Npgsql
             {
                 var row = table.NewRow();
 
-                row["AllowDBNull"] = column.AllowDBNull == true;
+                row["AllowDBNull"] = column.AllowDBNull;
                 row["BaseColumnName"] = column.BaseColumnName;
                 row["BaseCatalogName"] = column.BaseCatalogName;
                 row["BaseSchemaName"] = column.BaseSchemaName;
