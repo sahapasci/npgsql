@@ -546,9 +546,8 @@ namespace Npgsql
                         {
                             sb.Append(',');
                         }
-                        sb.Append('"');
                         sb.Append(param.CleanName.Replace("\"", "\"\""));
-                        sb.Append("\" := ");
+                        sb.Append(" := ");
                         sb.Append('$');
                         sb.Append(i);
                         hasWrittenFirst = true;
