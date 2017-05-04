@@ -1403,8 +1403,7 @@ namespace Npgsql
             foreach (var column in GetColumnSchema())
             {
                 var row = table.NewRow();
-
-                row["AllowDBNull"] = column.AllowDBNull;
+                row["AllowDBNull"] = (object)column.AllowDBNull ?? DBNull.Value;
                 row["BaseColumnName"] = column.BaseColumnName;
                 row["BaseCatalogName"] = column.BaseCatalogName;
                 row["BaseSchemaName"] = column.BaseSchemaName;

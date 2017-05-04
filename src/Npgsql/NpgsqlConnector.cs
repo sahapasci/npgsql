@@ -326,7 +326,7 @@ namespace Npgsql
         /// </summary>
         internal ConnectorState State
         {
-            get { return (ConnectorState)_state; }
+            get => (ConnectorState)_state;
             set
             {
                 var newState = (int)value;
@@ -949,7 +949,7 @@ namespace Npgsql
                     return null;
                 case BackendMessageCode.NoticeResponse:
                     var notice = new PostgresNotice(buf);
-                    Log.Debug($"Received notice: {notice}", Id);
+                    Log.Debug($"Received notice: {notice.MessageText}", Id);
                     Connection?.OnNotice(notice);
                     return null;
                 case BackendMessageCode.NotificationResponse:
@@ -1829,6 +1829,8 @@ namespace Npgsql
                     break;
                 }
             }
+            if (!versionString.Contains('.'))
+                versionString += ".0";
             ServerVersion = new Version(versionString);
         }
 

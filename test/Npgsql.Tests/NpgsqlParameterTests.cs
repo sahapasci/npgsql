@@ -197,7 +197,7 @@ namespace Npgsql.Tests
         [Test]
         public void Constructor2_Value_Null()
         {
-            var p = new NpgsqlParameter("address", (Object) null);
+            var p = new NpgsqlParameter("address", (object) null);
             Assert.AreEqual(DbType.Object, p.DbType, "A:DbType");
             Assert.AreEqual(ParameterDirection.Input, p.Direction, "A:Direction");
             Assert.IsFalse(p.IsNullable, "A:IsNullable");
@@ -403,10 +403,10 @@ namespace Npgsql.Tests
         {
             var notsupported = new object[]
                                         {
-                                            UInt16.MaxValue,
-                                            UInt32.MaxValue,
-                                            UInt64.MaxValue,
-                                            SByte.MaxValue,
+                                            ushort.MaxValue,
+                                            uint.MaxValue,
+                                            ulong.MaxValue,
+                                            sbyte.MaxValue,
                                             new NpgsqlParameter()
                                         };
 
@@ -697,7 +697,7 @@ namespace Npgsql.Tests
             using (var command = new NpgsqlCommand())
             {
                 // Put plenty of parameters in the collection to turn on hash lookup functionality.
-                for (int i = 0 ; i < 10 ; i++)
+                for (var i = 0 ; i < 10 ; i++)
                 {
                     command.Parameters.AddWithValue(string.Format("p{0:00}", i + 1), NpgsqlDbType.Text, string.Format("String parameter value {0}", i + 1));
                 }

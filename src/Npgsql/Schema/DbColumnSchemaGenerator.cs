@@ -208,11 +208,6 @@ ORDER BY attnum";
                     column.UdtAssemblyQualifiedName = column.DataType.AssemblyQualifiedName;
             }
 
-            if (column.AllowDBNull == null)
-            {
-                column.AllowDBNull = true;
-            }
-
             if (typeModifier == -1)
                 return;
 
