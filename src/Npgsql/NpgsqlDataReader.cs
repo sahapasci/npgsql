@@ -181,11 +181,8 @@ namespace Npgsql
         /// </summary>
         /// <param name="cancellationToken">Ignored for now.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public override async Task<bool> ReadAsync(CancellationToken cancellationToken)
-        {
-            using (NoSynchronizationContextScope.Enter())
-                return await Read(true);
-        }
+        public override Task<bool> ReadAsync(CancellationToken cancellationToken)
+            => SynchronizationContextSwitcher.NoContext(async () => await Read(true));
 
         async Task<bool> Read(bool async)
         {
@@ -320,21 +317,21 @@ namespace Npgsql
         /// </summary>
         /// <param name="cancellationToken">Currently ignored.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public override async Task<bool> NextResultAsync(CancellationToken cancellationToken)
-        {
-            try
+        public override Task<bool> NextResultAsync(CancellationToken cancellationToken)
+            => SynchronizationContextSwitcher.NoContext(async () =>
             {
-                using (NoSynchronizationContextScope.Enter())
+                try
+                {
                     return IsSchemaOnly ? await NextResultSchemaOnly(true) : await NextResult(true);
-            }
-            catch (PostgresException e)
-            {
-                _state = ReaderState.Consumed;
-                if ((_statementIndex >= 0) && (_statementIndex < _statements.Count))
-                    e.Statement = _statements[_statementIndex];
-                throw;
-            }
-        }
+                }
+                catch (PostgresException e)
+                {
+                    _state = ReaderState.Consumed;
+                    if (_statementIndex >= 0 && _statementIndex < _statements.Count)
+                        e.Statement = _statements[_statementIndex];
+                    throw;
+                }
+            });
 
         async Task<bool> NextResult(bool async)
         {
@@ -682,10 +679,10 @@ namespace Npgsql
         /// <summary>
         /// Closes the <see cref="NpgsqlDataReader"/> reader, allowing a new command to be executed.
         /// </summary>
-#if NET45 || NET451
-        public override void Close()
-#else
+#if NETSTANDARD1_3
         public void Close()
+#else
+        public override void Close()
 #endif
             => Close(false, false).GetAwaiter().GetResult();
 
@@ -992,6 +989,29 @@ namespace Npgsql
             return row.GetStream();
         }
 
+        /// <summary>
+        /// Retrieves data as a <see cref="Stream"/>.
+        /// </summary>
+        /// <param name="ordinal">The zero-based column ordinal.</param>
+        /// <returns>The returned object.</returns>
+        public Task<Stream> GetStreamAsync(int ordinal)
+        {
+            CheckRowAndOrdinal(ordinal);
+
+            var fieldDescription = _rowDescription[ordinal];
+            var handler = fieldDescription.Handler as ByteaHandler;
+            if (handler == null)
+                throw new InvalidCastException("GetStream() not supported for type " + fieldDescription.Handler.PgDisplayName);
+
+            return SynchronizationContextSwitcher.NoContext(async () =>
+            {
+                var row = Row;
+                await row.SeekToColumnStart(ordinal, false);
+                row.CheckNotNull();
+                return row.GetStream();
+            });
+        }
+
         #endregion
 
         #region Special text getters
@@ -1047,6 +1067,29 @@ namespace Npgsql
             return handler.GetTextReader(row.GetStream());
         }
 
+        /// <summary>
+        /// Retrieves data as a <see cref="TextReader"/>.
+        /// </summary>
+        /// <param name="ordinal">The zero-based column ordinal.</param>
+        /// <returns>The returned object.</returns>
+        public Task<TextReader> GetTextReaderAsync(int ordinal)
+        {
+            CheckRowAndOrdinal(ordinal);
+
+            var fieldDescription = _rowDescription[ordinal];
+            var handler = fieldDescription.Handler as ITextReaderHandler;
+            if (handler == null)
+                throw new InvalidCastException("GetTextReader() not supported for type " + fieldDescription.Handler.PgDisplayName);
+
+            return SynchronizationContextSwitcher.NoContext(async () =>
+            {
+                var row = Row;
+                await row.SeekToColumnStart(ordinal, false);
+                row.CheckNotNull();
+                return handler.GetTextReader(row.GetStream());
+            });
+        }
+
         #endregion
 
         #region IsDBNull
@@ -1065,11 +1108,8 @@ namespace Npgsql
         /// <param name="ordinal">The zero-based column to be retrieved.</param>
         /// <param name="cancellationToken">Currently ignored.</param>
         /// <returns><b>true</b> if the specified column value is equivalent to <see cref="DBNull"/> otherwise <b>false</b>.</returns>
-        public override async Task<bool> IsDBNullAsync(int ordinal, CancellationToken cancellationToken)
-        {
-            using (NoSynchronizationContextScope.Enter())
-                return await IsDBNull(ordinal, true);
-        }
+        public override Task<bool> IsDBNullAsync(int ordinal, CancellationToken cancellationToken)
+            => SynchronizationContextSwitcher.NoContext(async () => await IsDBNull(ordinal, true));
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         // ReSharper disable once InconsistentNaming
@@ -1226,11 +1266,8 @@ namespace Npgsql
         /// <param name="ordinal">The column to be retrieved.</param>
         /// <param name="cancellationToken">Currently ignored.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public override async Task<T> GetFieldValueAsync<T>(int ordinal, CancellationToken cancellationToken)
-        {
-            using (NoSynchronizationContextScope.Enter())
-                return await GetFieldValue<T>(ordinal, true);
-        }
+        public override Task<T> GetFieldValueAsync<T>(int ordinal, CancellationToken cancellationToken)
+            => SynchronizationContextSwitcher.NoContext(async () => await GetFieldValue<T>(ordinal, true));
 
         async ValueTask<T> GetFieldValue<T>(int ordinal, bool async)
         {
@@ -1320,10 +1357,10 @@ namespace Npgsql
         /// <returns>An <see cref="IEnumerator"/> that can be used to iterate through the rows in the data reader.</returns>
         public override IEnumerator GetEnumerator()
         {
-#if NET45 || NET451
-            return new DbEnumerator(this);
-#else
+#if NETSTANDARD1_3
             throw new NotSupportedException("GetEnumerator not yet supported in .NET Core");
+#else
+            return new DbEnumerator(this);
 #endif
         }
 
@@ -1371,7 +1408,7 @@ namespace Npgsql
         #endregion
 
         #region Schema metadata table
-#if NET45 || NET451
+#if !NETSTANDARD1_3
 
         /// <summary>
         /// Returns a System.Data.DataTable that describes the column metadata of the DataReader.
@@ -1411,6 +1448,7 @@ namespace Npgsql
             foreach (var column in GetColumnSchema())
             {
                 var row = table.NewRow();
+
                 row["AllowDBNull"] = (object)column.AllowDBNull ?? DBNull.Value;
                 row["BaseColumnName"] = column.BaseColumnName;
                 row["BaseCatalogName"] = column.BaseCatalogName;

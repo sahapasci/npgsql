@@ -66,7 +66,7 @@ namespace Npgsql
         /// </summary>
         public NpgsqlConnectionStringBuilder() { Init(); }
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
         /// <summary>
         /// Initializes a new instance of the NpgsqlConnectionStringBuilder class, optionally using ODBC rules for quoting values.
         /// </summary>
@@ -884,6 +884,52 @@ namespace Npgsql
         int _keepAlive;
 
         /// <summary>
+        /// The number of seconds of connection inactivity before a TCP keepalive query is sent.
+        /// Use of this option is discouraged, use <see cref="KeepAlive"/> instead if possible.
+        /// Set to 0 (the default) to disable. Supported only on Windows.
+        /// </summary>
+        [Category("Advanced")]
+        [Description("The number of milliseconds of connection inactivity before a TCP keepalive query is sent.")]
+        [DisplayName("TCP Keepalive Time")]
+        [NpgsqlConnectionStringProperty]
+        public int TcpKeepAliveTime
+        {
+            get => _tcpKeepAliveTime;
+            set
+            {
+                if (value < 0)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "TcpKeepAliveTime can't be negative");
+
+                _tcpKeepAliveTime = value;
+                SetValue(nameof(TcpKeepAliveTime), value);
+            }
+        }
+        int _tcpKeepAliveTime;
+
+        /// <summary>
+        /// The interval, in milliseconds, between when successive keep-alive packets are sent if no acknowledgement is received.
+        /// Defaults to the value of <see cref="TcpKeepAliveTime"/>. <see cref="TcpKeepAliveTime"/> must be non-zero as well.
+        /// Supported only on Windows.
+        /// </summary>
+        [Category("Advanced")]
+        [Description("The interval, in milliseconds, between when successive keep-alive packets are sent if no acknowledgement is received.")]
+        [DisplayName("TCP Keepalive Interval")]
+        [NpgsqlConnectionStringProperty]
+        public int TcpKeepAliveInterval
+        {
+            get => _tcpKeepAliveInterval;
+            set
+            {
+                if (value < 0)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "TcpKeepAliveInterval can't be negative");
+
+                _tcpKeepAliveInterval = value;
+                SetValue(nameof(TcpKeepAliveInterval), value);
+            }
+        }
+        int _tcpKeepAliveInterval;
+
+        /// <summary>
         /// Determines the size of the internal buffer Npgsql uses when reading. Increasing may improve performance if transferring large values from the database.
         /// </summary>
         [Category("Advanced")]
@@ -1223,7 +1269,7 @@ namespace Npgsql
                 yield return new KeyValuePair<string, object>(k, this[k]);
         }
 
-#if !(NET45 || NET451)
+#if NETSTANDARD1_3
         /// <summary>
         /// Gets a value indicating whether the ICollection{T} is read-only.
         /// </summary>
@@ -1233,7 +1279,7 @@ namespace Npgsql
 
         #region ICustomTypeDescriptor
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
         protected override void GetProperties(Hashtable propertyDescriptors)
         {

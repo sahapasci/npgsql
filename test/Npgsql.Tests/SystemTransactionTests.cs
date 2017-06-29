@@ -21,6 +21,7 @@
 // TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #endregion
 
+// TransactionScope exists in netstandard20, but distributed transactions do not
 #if NET451
 
 using System;
@@ -38,7 +39,7 @@ namespace Npgsql.Tests
         [Test, Description("Single connection enlisting explicitly, committing")]
         public void ExplicitEnlist()
         {
-            using (var conn = new NpgsqlConnection(ConnectionStringEnlistOff))
+            using (var conn = new NpgsqlConnection(ConnectionString))
             {
                 conn.Open();
                 using (var scope = new TransactionScope())
@@ -60,7 +61,7 @@ namespace Npgsql.Tests
         [Test, Description("Single connection enlisting implicitly, committing")]
         public void ImplicitEnlist()
         {
-            var conn = new NpgsqlConnection(ConnectionStringEnlistOn);
+            var conn = new NpgsqlConnection(ConnectionStringWithEnlist);
             using (var scope = new TransactionScope())
             {
                 conn.Open();
@@ -72,19 +73,6 @@ namespace Npgsql.Tests
             {
                 Assert.That(conn.ExecuteScalar(@"SELECT COUNT(*) FROM data"), Is.EqualTo(1));
                 tx.Rollback();
-            }
-        }
-
-        [Test]
-        public void EnlistOff()
-        {
-            using (new TransactionScope())
-            using (var conn1 = OpenConnection(ConnectionStringEnlistOff))
-            using (var conn2 = OpenConnection(ConnectionStringEnlistOff))
-            {
-                Assert.That(conn1.EnlistedTransaction, Is.Null);
-                Assert.That(conn1.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test')"), Is.EqualTo(1));
-                Assert.That(conn2.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
             }
         }
 
@@ -111,8 +99,8 @@ namespace Npgsql.Tests
         [Test]
         public void TwoConnections()
         {
-            using (var conn1 = OpenConnection(ConnectionStringEnlistOff))
-            using (var conn2 = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn1 = OpenConnection())
+            using (var conn2 = OpenConnection())
             {
                 using (var scope = new TransactionScope())
                 {
@@ -133,8 +121,8 @@ namespace Npgsql.Tests
         public void TwoConnectionsRollback()
         {
             using (new TransactionScope())
-            using (var conn1 = OpenConnection(ConnectionStringEnlistOn))
-            using (var conn2 = OpenConnection(ConnectionStringEnlistOn))
+            using (var conn1 = OpenConnection(ConnectionStringWithEnlist))
+            using (var conn2 = OpenConnection(ConnectionStringWithEnlist))
             {
                 Assert.That(conn1.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test1')"), Is.EqualTo(1));
                 Assert.That(conn2.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test2')"), Is.EqualTo(1));
@@ -147,8 +135,8 @@ namespace Npgsql.Tests
         [Test]
         public void TwoConnectionsWithFailure()
         {
-            using (var conn1 = OpenConnection(ConnectionStringEnlistOff))
-            using (var conn2 = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn1 = OpenConnection())
+            using (var conn2 = OpenConnection())
             {
                 var scope = new TransactionScope();
                 conn1.EnlistTransaction(Transaction.Current);
@@ -171,7 +159,7 @@ namespace Npgsql.Tests
         [Test]
         public void CloseConnection()
         {
-            var connString = new NpgsqlConnectionStringBuilder(ConnectionStringEnlistOn)
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionStringWithEnlist)
             {
                 ApplicationName = nameof(CloseConnection),
             }.ToString();
@@ -194,7 +182,7 @@ namespace Npgsql.Tests
         [Test]
         public void EnlistToTwoTransactions()
         {
-            using (var conn = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn = OpenConnection())
             {
                 var ctx = new CommittableTransaction();
                 conn.EnlistTransaction(ctx);
@@ -212,7 +200,7 @@ namespace Npgsql.Tests
         [Test]
         public void EnlistTwiceToSameTransaction()
         {
-            using (var conn = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn = OpenConnection())
             {
                 var ctx = new CommittableTransaction();
                 conn.EnlistTransaction(ctx);
@@ -230,7 +218,7 @@ namespace Npgsql.Tests
         [Test]
         public void ScopeAfterScope()
         {
-            using (var conn = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn = OpenConnection())
             {
                 using (new TransactionScope())
                     conn.EnlistTransaction(Transaction.Current);
@@ -249,19 +237,21 @@ namespace Npgsql.Tests
         public void ReuseConnection()
         {
             using (var scope = new TransactionScope())
-            using (var conn = new NpgsqlConnection(ConnectionStringEnlistOn))
             {
-                conn.Open();
-                var processId = conn.ProcessID;
-                conn.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test1')");
-                conn.Close();
+                using (var conn = new NpgsqlConnection(ConnectionStringWithEnlist))
+                {
+                    conn.Open();
+                    var processId = conn.ProcessID;
+                    conn.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test1')");
+                    conn.Close();
 
-                conn.Open();
-                Assert.That(conn.ProcessID, Is.EqualTo(processId));
-                conn.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test2')");
-                conn.Close();
+                    conn.Open();
+                    Assert.That(conn.ProcessID, Is.EqualTo(processId));
+                    conn.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test2')");
+                    conn.Close();
 
-                scope.Complete();
+                    scope.Complete();
+                }
             }
             AssertNumberOfRows(2);
         }
@@ -270,7 +260,7 @@ namespace Npgsql.Tests
         public void ReuseConnectionRollback()
         {
             using (var scope = new TransactionScope())
-            using (var conn = new NpgsqlConnection(ConnectionStringEnlistOn))
+            using (var conn = new NpgsqlConnection(ConnectionStringWithEnlist))
             {
                 conn.Open();
                 var processId = conn.ProcessID;
@@ -292,11 +282,11 @@ namespace Npgsql.Tests
         {
             using (new TransactionScope())
             {
-                using (var conn1 = new NpgsqlConnection(ConnectionStringEnlistOn))
+                using (var conn1 = new NpgsqlConnection(ConnectionStringWithEnlist))
                 {
                     conn1.Open();
                     var processId = conn1.ProcessID;
-                    using (var conn2 = new NpgsqlConnection(ConnectionStringEnlistOn)) {}
+                    using (var conn2 = new NpgsqlConnection(ConnectionStringWithEnlist)) {}
                     conn1.Close();
 
                     conn1.Open();
@@ -309,7 +299,7 @@ namespace Npgsql.Tests
         [Test]
         public void TimeoutTriggersRollbackWhileBusy()
         {
-            using (var conn = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn = OpenConnection())
             {
                 using (new TransactionScope(TransactionScopeOption.Required, TimeSpan.FromSeconds(1)))
                 {
@@ -328,7 +318,7 @@ namespace Npgsql.Tests
         public void SchemaConnectionShouldntEnlist()
         {
             using (var tran = new TransactionScope())
-            using (var conn = OpenConnection(ConnectionStringEnlistOn))
+            using (var conn = OpenConnection(ConnectionStringWithEnlist))
             {
                 using (var cmd = new NpgsqlCommand("SELECT * FROM data", conn))
                 using (var reader = cmd.ExecuteReader(CommandBehavior.KeyInfo))
@@ -340,12 +330,31 @@ namespace Npgsql.Tests
             }
         }
 
+        [Test, IssueLink("https://github.com/npgsql/npgsql/issues/1594")]
+        public void Bug1594()
+        {
+            using (new TransactionScope())
+            {
+                using (var conn = OpenConnection(ConnectionStringWithEnlist))
+                using (var innerScope1 = new TransactionScope())
+                {
+                    conn.ExecuteNonQuery(@"INSERT INTO data (name) VALUES ('test1')");
+                    innerScope1.Complete();
+                }
+                using (OpenConnection(ConnectionStringWithEnlist))
+                using (new TransactionScope())
+                {
+                    // Don't complete, triggering rollback
+                }
+            }
+        }
+
         void AssertNoPreparedTransactions()
             => Assert.That(GetNumberOfPreparedTransactions(), Is.EqualTo(0));
 
         int GetNumberOfPreparedTransactions()
         {
-            using (var conn = OpenConnection(ConnectionStringEnlistOff))
+            using (var conn = OpenConnection())
             using (var cmd = new NpgsqlCommand("SELECT COUNT(*) FROM pg_prepared_xacts WHERE database = @database", conn))
             {
                 cmd.Parameters.Add(new NpgsqlParameter("database", conn.Database));
@@ -356,11 +365,8 @@ namespace Npgsql.Tests
         void AssertNumberOfRows(int expected)
           => Assert.That(_controlConn.ExecuteScalar(@"SELECT COUNT(*) FROM data"), Is.EqualTo(expected));
 
-        public static string ConnectionStringEnlistOn =
+        public static string ConnectionStringWithEnlist =
             new NpgsqlConnectionStringBuilder(ConnectionString) { Enlist = true }.ToString();
-
-        public static string ConnectionStringEnlistOff =
-            new NpgsqlConnectionStringBuilder(ConnectionString) { Enlist = false }.ToString();
 
         #region Setup
 

@@ -36,13 +36,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.Logging;
-using Npgsql.NameTranslation;
-#if NET45 || NET451
-using System.Transactions;
-#endif
 using NpgsqlTypes;
 using IsolationLevel = System.Data.IsolationLevel;
 using ThreadState = System.Threading.ThreadState;
+
+#if !NETSTANDARD1_3
+using System.Transactions;
+#endif
 
 namespace Npgsql
 {
@@ -90,7 +90,7 @@ namespace Npgsql
 
         bool _wasBroken;
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
         [CanBeNull]
         internal Transaction EnlistedTransaction { get; set; }
 #endif
@@ -128,7 +128,7 @@ namespace Npgsql
             GC.SuppressFinalize(this);
             ConnectionString = connectionString;
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
             // Fix authentication problems. See https://bugzilla.novell.com/show_bug.cgi?id=MONO77559 and
             // http://pgfoundry.org/forum/message.php?msg_id=1002377 for more info.
             RSACryptoServiceProvider.UseMachineKeyStore = true;
@@ -149,11 +149,8 @@ namespace Npgsql
         /// </remarks>
         /// <param name="cancellationToken">The cancellation instruction.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public override async Task OpenAsync(CancellationToken cancellationToken)
-        {
-            using (NoSynchronizationContextScope.Enter())
-                await Open(true, cancellationToken);
-        }
+        public override Task OpenAsync(CancellationToken cancellationToken)
+            => SynchronizationContextSwitcher.NoContext(async () => await Open(true, cancellationToken));
 
         void GetPoolAndSettings()
         {
@@ -221,7 +218,7 @@ namespace Npgsql
                 {
                     _userFacingConnectionString = _pool.UserFacingConnectionString;
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
                     if (Settings.Enlist)
                     {
                         if (Transaction.Current != null)
@@ -238,7 +235,7 @@ namespace Npgsql
                     }
                     else  // No enlist
 #endif
-                        Connector = await _pool.Allocate(this, timeout, async, cancellationToken);
+                    Connector = await _pool.Allocate(this, timeout, async, cancellationToken);
 
                     Counters.SoftConnectsPerSecond.Increment();
 
@@ -247,7 +244,7 @@ namespace Npgsql
                     Connector.TypeHandlerRegistry.ActivateGlobalMappings();
                 }
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
                 // We may have gotten an already enlisted pending connector above, no need to enlist in that case
                 if (Settings.Enlist && Transaction.Current != null && EnlistedTransaction == null)
                     EnlistTransaction(Transaction.Current);
@@ -499,24 +496,34 @@ namespace Npgsql
             }
         }
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
         /// <summary>
         /// Enlist transation.
         /// </summary>
         public override void EnlistTransaction(Transaction transaction)
         {
-            if (transaction == null)
-                throw new ArgumentNullException(nameof(transaction));
-
-            if (EnlistedTransaction == transaction)
-                return;
-
             if (EnlistedTransaction != null)
-                throw new InvalidOperationException($"Already enlisted to transaction (localid={EnlistedTransaction.TransactionInformation.LocalIdentifier})");
+            {
+                if (EnlistedTransaction.Equals(transaction))
+                    return;
+                try
+                {
+                    if (EnlistedTransaction.TransactionInformation.Status == System.Transactions.TransactionStatus.Active)
+                        throw new InvalidOperationException($"Already enlisted to transaction (localid={EnlistedTransaction.TransactionInformation.LocalIdentifier})");
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The MSDTC 2nd phase is asynchronous, so we may end up checking the TransactionInformation on
+                    // a disposed transaction. To be extra safe we catch that, and understand that the transaction
+                    // has ended - no problem for reenlisting.
+                }
+            }
 
             var connector = CheckReadyAndGetConnector();
 
             EnlistedTransaction = transaction;
+            if (transaction == null)
+                return;
 
             // Until #1378 is implemented, we have no recovery, and so no need to enlist as a durable resource manager
             // (or as promotable single phase).
@@ -553,7 +560,9 @@ namespace Npgsql
                 Connector.Close();
             else
             {
-#if NET45 || NET451
+#if NETSTANDARD1_3
+                _pool.Release(Connector);
+#else
                 if (EnlistedTransaction == null)
                     _pool.Release(Connector);
                 else
@@ -565,8 +574,6 @@ namespace Npgsql
                     Connector.Connection = null;
                     EnlistedTransaction = null;
                 }
-#else
-                _pool.Release(Connector);
 #endif
             }
 
@@ -1253,7 +1260,7 @@ namespace Npgsql
         #endregion State checks
 
         #region Schema operations
-#if NET45 || NET451
+#if !NETSTANDARD1_3
         /// <summary>
         /// Returns the supported collections
         /// </summary>
@@ -1335,7 +1342,7 @@ namespace Npgsql
         /// <summary>
         /// Creates a closed connection with the connection string and authentication details of this message.
         /// </summary>
-#if NET45 || NET451
+#if !NETSTANDARD1_3
         object ICloneable.Clone()
 #else
         public NpgsqlConnection Clone()
@@ -1393,7 +1400,7 @@ namespace Npgsql
             Open();
         }
 
-#if NET45 || NET451
+#if !NETSTANDARD1_3
         /// <summary>
         /// DB provider factory.
         /// </summary>
