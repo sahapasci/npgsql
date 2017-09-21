@@ -7,7 +7,7 @@
     <Company>Npgsql</Company>
     <PackageTags>npgsql postgresql postgres ado ado.net database sql</PackageTags>
     <VersionPrefix>3.2.6</VersionPrefix>
-    <TargetFrameworks>net45;net451;netstandard1.3;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net45;net451</TargetFrameworks>
     <WarningsAsErrors>true</WarningsAsErrors>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -21,6 +21,9 @@
     <RepositoryUrl>git://github.com/npgsql/npgsql</RepositoryUrl>
     <!-- This is somehow important for Microsoft.ApiDesignGuidelines.Analyzers -->
     <Features>IOperation</Features>
+    <TargetFrameworkIdentifier>.NETFramework</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <TargetFrameworkProfile />
   </PropertyGroup>
 
   <ItemGroup>
