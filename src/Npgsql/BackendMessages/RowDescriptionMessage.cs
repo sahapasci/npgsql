@@ -158,7 +158,7 @@ namespace Npgsql.BackendMessages
         )
         {
             _typeMapper = typeMapper;
-            Name = name;
+            Name = name.ToUpperInvariant();
             TableOID = tableOID;
             ColumnAttributeNumber = columnAttributeNumber;
             TypeOID = oid;
