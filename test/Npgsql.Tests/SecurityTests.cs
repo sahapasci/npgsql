@@ -1,7 +1,7 @@
 ﻿#region License
 // The PostgreSQL License
 //
-// Copyright (C) 2017 The Npgsql Development Team
+// Copyright (C) 2018 The Npgsql Development Team
 //
 // Permission to use, copy, modify, and distribute this software and its
 // documentation for any purpose, without fee, and without a written
@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -194,6 +195,26 @@ namespace Npgsql.Tests
                             while (await reader.ReadAsync().ConfigureAwait(false)) {}
                     }
                 }
+            }
+        }
+
+        [Test, IssueLink("https://github.com/npgsql/npgsql/issues/1718")]
+        [Timeout(12000)]
+        public void Bug1718()
+        {
+            var csb = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                SslMode = SslMode.Require,
+                TrustServerCertificate = true
+            };
+
+            using (var conn = OpenConnection(csb))
+            using (var cmd = CreateSleepCommand(conn, 10000))
+            {
+                var cts = new CancellationTokenSource(1000).Token;
+                Assert.That(async () => await cmd.ExecuteNonQueryAsync(cts), Throws.Exception
+                    .TypeOf<PostgresException>()
+                    .With.Property(nameof(PostgresException.SqlState)).EqualTo("57014"));
             }
         }
 

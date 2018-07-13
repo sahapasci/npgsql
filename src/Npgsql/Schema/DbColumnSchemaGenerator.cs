@@ -1,4 +1,5 @@
 ﻿using System;
+using System.CodeDom;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -9,9 +10,7 @@ using System.Linq;
 using Npgsql.BackendMessages;
 using Npgsql.PostgresTypes;
 using Npgsql.TypeHandlers;
-#if !NETSTANDARD1_3
 using System.Transactions;
-#endif
 
 namespace Npgsql.Schema
 {
@@ -30,9 +29,13 @@ namespace Npgsql.Schema
 
         #region Columns queries
 
-        static string GenerateColumnsQuery(string columnFieldFilter) =>
+        static string GenerateColumnsQuery(Version pgVersion, string columnFieldFilter) =>
+            pgVersion < new Version(8, 2)
+                ? GenerateOldColumnsQuery(columnFieldFilter)
+                :
 $@"SELECT
-     typ.oid AS typoid, nspname, relname, attname, typ.typname, attrelid, attnum, attnotnull,
+     typ.oid AS typoid, nspname, relname, attname, attrelid, attnum, attnotnull,
+     {(pgVersion >= new Version(10, 0) ? "attidentity != ''" : "FALSE")} AS isidentity,
      CASE WHEN typ.typtype = 'd' THEN typ.typtypmod ELSE atttypmod END AS typmod,
      CASE WHEN atthasdef THEN (SELECT pg_get_expr(adbin, cls.oid) FROM pg_attrdef WHERE adrelid = cls.oid AND adnum = attr.attnum) ELSE NULL END AS default,
      CASE WHEN col.is_updatable = 'YES' THEN true ELSE false END AS is_updatable,
@@ -69,7 +72,7 @@ ORDER BY attnum";
         /// </summary>
         static string GenerateOldColumnsQuery(string columnFieldFilter) =>
             $@"SELECT
-     typ.oid AS typoid, nspname, relname, attname, typ.typname, attrelid, attnum, attnotnull,
+     typ.oid AS typoid, nspname, relname, attname, attrelid, attnum, attnotnull,
      CASE WHEN typ.typtype = 'd' THEN typ.typtypmod ELSE atttypmod END AS typmod,
      CASE WHEN atthasdef THEN (SELECT pg_get_expr(adbin, cls.oid) FROM pg_attrdef WHERE adrelid = cls.oid AND adnum = attr.attnum) ELSE NULL END AS default,
      TRUE AS is_updatable,  /* Supported only since PG 8.2 */
@@ -95,8 +98,8 @@ ORDER BY attnum";
 
         internal ReadOnlyCollection<NpgsqlDbColumn> GetColumnSchema()
         {
-            var fields = _rowDescription.Fields;
-            if (fields.Count == 0)
+            var fields = _rowDescription?.Fields;
+            if ((fields?.Count ?? 0) == 0)
                 return new List<NpgsqlDbColumn>().AsReadOnly();
 
             var result = new List<NpgsqlDbColumn>(fields.Count);
@@ -115,16 +118,10 @@ ORDER BY attnum";
 
             if (_fetchAdditionalInfo && columnFieldFilter != "")
             {
-                var query = _connection.PostgreSqlVersion >= new Version(8, 2)
-                    ? GenerateColumnsQuery(columnFieldFilter)
-                    : GenerateOldColumnsQuery(columnFieldFilter);
+                var query = GenerateColumnsQuery(_connection.PostgreSqlVersion, columnFieldFilter);
 
-#if NETSTANDARD1_3
-                using (var connection = _connection.Clone())
-#else
                 using (new TransactionScope(TransactionScopeOption.Suppress))
                 using (var connection = (NpgsqlConnection)((ICloneable)_connection).Clone())
-#endif
                 {
                     connection.Open();
 
@@ -133,7 +130,7 @@ ORDER BY attnum";
                     {
                         for (; reader.Read(); populatedColumns++)
                         {
-                            var column = LoadColumnDefinition(reader, _connection.Connector.TypeHandlerRegistry);
+                            var column = LoadColumnDefinition(reader, _connection.Connector.TypeMapper.DatabaseInfo);
 
                             var ordinal = fields.FindIndex(f => f.TableOID == column.TableOID && f.ColumnAttributeNumber - 1 == column.ColumnAttributeNumber);
                             Debug.Assert(ordinal >= 0);
@@ -144,13 +141,6 @@ ORDER BY attnum";
                             result[ordinal] = column;
                         }
                     }
-
-                    if (populatedColumns == fields.Count)
-                    {
-                        // All columns were regular table columns that got loaded, we're done
-                        Debug.Assert(result.All(c => c != null));
-                        return result.AsReadOnly();
-                    }
                 }
             }
 
@@ -158,12 +148,15 @@ ORDER BY attnum";
             // Fill in whatever info we have from the RowDescription itself
             for (var i = 0; i < fields.Count; i++)
             {
-                if (result[i] != null)
-                    continue;
-                var column = SetUpNonColumnField(fields[i]);
-                column.ColumnOrdinal = i;
-                result[i] = column;
-                populatedColumns++;
+                var field = fields[i];
+                if (result[i] == null)
+                {
+                    var column = SetUpNonColumnField(field);
+                    column.ColumnOrdinal = i;
+                    result[i] = column;
+                    populatedColumns++;
+                }
+                result[i].ColumnName = result[i].BaseColumnName = field.Name.StartsWith("?column?") ? null : field.Name;
             }
 
             if (populatedColumns != fields.Count)
@@ -172,35 +165,36 @@ ORDER BY attnum";
             return result.AsReadOnly();
         }
 
-        NpgsqlDbColumn LoadColumnDefinition(NpgsqlDataReader reader, TypeHandlerRegistry registry)
+        NpgsqlDbColumn LoadColumnDefinition(NpgsqlDataReader reader, NpgsqlDatabaseInfo databaseInfo)
         {
-            var columnName = reader.GetString(reader.GetOrdinal("attname"));
+            // Note: we don't set ColumnName and BaseColumnName. These should always contain the
+            // column alias rather than the table column name (i.e. in case of "SELECT foo AS foo_alias").
+            // It will be set later.
             var column = new NpgsqlDbColumn
             {
                 AllowDBNull = !reader.GetBoolean(reader.GetOrdinal("attnotnull")),
                 BaseCatalogName = _connection.Database,
-                BaseColumnName = columnName,
                 BaseSchemaName = reader.GetString(reader.GetOrdinal("nspname")),
                 BaseServerName = _connection.Host,
                 BaseTableName = reader.GetString(reader.GetOrdinal("relname")),
-                ColumnName = columnName,
                 ColumnOrdinal = reader.GetInt32(reader.GetOrdinal("attnum")) - 1,
                 ColumnAttributeNumber = (short)(reader.GetInt16(reader.GetOrdinal("attnum")) - 1),
                 IsKey = reader.GetBoolean(reader.GetOrdinal("isprimarykey")),
                 IsReadOnly = !reader.GetBoolean(reader.GetOrdinal("is_updatable")),
                 IsUnique = reader.GetBoolean(reader.GetOrdinal("isunique")),
-                DataTypeName = reader.GetString(reader.GetOrdinal("typname")),
 
                 TableOID = reader.GetFieldValue<uint>(reader.GetOrdinal("attrelid")),
                 TypeOID = reader.GetFieldValue<uint>(reader.GetOrdinal("typoid"))
             };
 
-            column.PostgresType = registry.PostgresTypes.ByOID[column.TypeOID];
+            column.PostgresType = databaseInfo.ByOID[column.TypeOID];
+            column.DataTypeName = column.PostgresType.DisplayName; // Facets do not get included
 
             var defaultValueOrdinal = reader.GetOrdinal("default");
             column.DefaultValue = reader.IsDBNull(defaultValueOrdinal) ? null : reader.GetString(defaultValueOrdinal);
 
-            column.IsAutoIncrement = column.DefaultValue != null && column.DefaultValue.StartsWith("nextval(");
+            column.IsAutoIncrement = reader.GetBoolean(reader.GetOrdinal("isidentity")) ||
+                column.DefaultValue != null && column.DefaultValue.StartsWith("nextval(");
 
             ColumnPostConfig(column, reader.GetInt32(reader.GetOrdinal("typmod")));
 
@@ -209,12 +203,10 @@ ORDER BY attnum";
 
         NpgsqlDbColumn SetUpNonColumnField(FieldDescription field)
         {
-            var columnName = field.Name.StartsWith("?column?") ? null : field.Name;
+            // ColumnName and BaseColumnName will be set later
             var column = new NpgsqlDbColumn
             {
-                ColumnName = columnName,
                 BaseCatalogName = _connection.Database,
-                BaseColumnName = columnName,
                 BaseServerName = _connection.Host,
                 IsReadOnly = true,
                 DataTypeName = field.PostgresType.DisplayName,
@@ -234,7 +226,18 @@ ORDER BY attnum";
         /// </summary>
         void ColumnPostConfig(NpgsqlDbColumn column, int typeModifier)
         {
-            column.DataType = _connection.Connector.TypeHandlerRegistry.TryGetByOID(column.TypeOID, out var handler)
+            var typeMapper = _connection.Connector.TypeMapper;
+
+            if (typeMapper.Mappings.TryGetValue(column.PostgresType.Name, out var mapping))
+                column.NpgsqlDbType = mapping.NpgsqlDbType;
+            else if (
+                column.PostgresType.Name.Contains(".") &&
+                typeMapper.Mappings.TryGetValue(column.PostgresType.Name.Split('.')[1], out mapping)
+            ) {
+                column.NpgsqlDbType = mapping.NpgsqlDbType;
+            }
+
+            column.DataType = typeMapper.TryGetByOID(column.TypeOID, out var handler)
                 ? handler.GetFieldType()
                 : null;
 
@@ -242,31 +245,17 @@ ORDER BY attnum";
             {
                 column.IsLong = handler is ByteaHandler;
 
-                if (handler is ICompositeHandler)
+                if (handler is IMappedCompositeHandler)
                     column.UdtAssemblyQualifiedName = column.DataType.AssemblyQualifiedName;
             }
 
-            if (typeModifier == -1)
-                return;
-
-            // If the column's type is a domain, use its base data type to interpret the typmod
-            var dataTypeName = column.PostgresType is PostgresDomainType
-                ? ((PostgresDomainType)column.PostgresType).BaseType.Name
-                : column.DataTypeName;
-            switch (dataTypeName)
-            {
-            case "bpchar":
-            case "char":
-            case "varchar":
-                column.ColumnSize = typeModifier - 4;
-                break;
-            case "numeric":
-            case "decimal":
-                // See http://stackoverflow.com/questions/3350148/where-are-numeric-precision-and-scale-for-a-field-found-in-the-pg-catalog-tables
-                column.NumericPrecision = ((typeModifier - 4) >> 16) & 65535;
-                column.NumericScale = (typeModifier - 4) & 65535;
-                break;
-            }
+            var facets = column.PostgresType.GetFacets(typeModifier);
+            if (facets.Size != null)
+                column.ColumnSize = facets.Size;
+            if (facets.Precision != null)
+                column.NumericPrecision = facets.Precision;
+            if (facets.Scale != null)
+                column.NumericScale = facets.Scale;
         }
     }
 }
