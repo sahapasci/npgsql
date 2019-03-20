@@ -24,9 +24,12 @@
 using GeoAPI;
 using GeoAPI.Geometries;
 using NetTopologySuite.Geometries;
+using NetTopologySuite.Geometries.Implementation;
 using Npgsql.Tests;
 using NUnit.Framework;
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
@@ -62,87 +65,106 @@ namespace Npgsql.PluginTests
         }
 
         protected override NpgsqlConnection OpenConnection(string connectionString = null)
+            => OpenConnection(connectionString);
+
+        protected NpgsqlConnection OpenConnection(string connectionString = null, Ordinates handleOrdinates = Ordinates.None)
         {
+            if (handleOrdinates == Ordinates.None)
+                handleOrdinates = Ordinates.XY;
+
             NetTopologySuiteBootstrapper.Bootstrap();
             var conn = base.OpenConnection(connectionString);
-            conn.TypeMapper.UseNetTopologySuite();
+            conn.TypeMapper.UseNetTopologySuite(
+                new DotSpatialAffineCoordinateSequenceFactory(handleOrdinates),
+                handleOrdinates: handleOrdinates);
             return conn;
         }
 
         public struct TestData
         {
+            public Ordinates Ordinates;
             public IGeometry Geometry;
             public string CommandText;
         }
 
-        static readonly TestData[] Tests =
-        {
-            new TestData { Geometry = new Point(new Coordinate(1d, 2500d)), CommandText = "st_makepoint(1,2500)" },
-            new TestData {
-                Geometry = new LineString(new[] { new Coordinate(1d, 1d), new Coordinate(1d, 2500d) }),
-                CommandText = "st_makeline(st_makepoint(1,1),st_makepoint(1,2500))"
-            },
-            new TestData {
-                Geometry = new Polygon(
-                    new LinearRing(new[] {
-                        new Coordinate(1d, 1d),
-                        new Coordinate(2d, 2d),
-                        new Coordinate(3d, 3d),
-                        new Coordinate(1d, 1d)
-                    })
-                ),
-                CommandText = "st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)]))"
-            },
-            new TestData {
-                Geometry = new MultiPoint(new[] { new Point (new Coordinate(1d, 1d)) }),
-                CommandText = "st_multi(st_makepoint(1, 1))"
-            },
-            new TestData {
-                Geometry = new MultiLineString(new[] {
-                    new LineString(new[] {
-                        new Coordinate(1d, 1d),
-                        new Coordinate(1d, 2500d)
-                    })
-                }),
-                CommandText = "st_multi(st_makeline(st_makepoint(1,1),st_makepoint(1,2500)))"
-            },
-            new TestData {
-                Geometry = new MultiPolygon(new[] {
+        public static IEnumerable TestCases {
+            get
+            {
+                // Two dimensional data
+                yield return new TestCaseData(Ordinates.None, new Point(1d, 2500d), "st_makepoint(1,2500)");
+
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    new LineString(new[] { new Coordinate(1d, 1d), new Coordinate(1d, 2500d) }),
+                    "st_makeline(st_makepoint(1,1),st_makepoint(1,2500))"
+                );
+
+                yield return new TestCaseData(
+                    Ordinates.None,
                     new Polygon(
-                        new LinearRing(new[] {
+                        new LinearRing(new[]
+                        {
                             new Coordinate(1d, 1d),
                             new Coordinate(2d, 2d),
                             new Coordinate(3d, 3d),
                             new Coordinate(1d, 1d)
                         })
-                    )
-                }),
-                CommandText = "st_multi(st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)])))"
-            },
-            new TestData {
-                Geometry = new GeometryCollection(new IGeometry[] {
-                    new Point(new Coordinate(1d, 1d)),
-                    new MultiPolygon(new[] {
+                    ),
+                    "st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)]))"
+                );
+
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    new MultiPoint(new[] { new Point(new Coordinate(1d, 1d)) }),
+                    "st_multi(st_makepoint(1, 1))"
+                );
+
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    new MultiLineString(new[]
+                    {
+                        new LineString(new[]
+                        {
+                            new Coordinate(1d, 1d),
+                            new Coordinate(1d, 2500d)
+                        })
+                    }),
+                    "st_multi(st_makeline(st_makepoint(1,1),st_makepoint(1,2500)))"
+                );
+
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    new MultiPolygon(new[]
+                    {
                         new Polygon(
-                            new LinearRing(new[] {
+                            new LinearRing(new[]
+                            {
                                 new Coordinate(1d, 1d),
                                 new Coordinate(2d, 2d),
                                 new Coordinate(3d, 3d),
                                 new Coordinate(1d, 1d)
                             })
                         )
-                    })
-                }),
-                CommandText = "st_collect(st_makepoint(1,1),st_multi(st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)]))))"
-            },
-            new TestData {
-                Geometry = new GeometryCollection(new IGeometry[] {
-                    new Point(new Coordinate(1d, 1d)),
-                    new GeometryCollection(new IGeometry[] {
+                    }),
+                    "st_multi(st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)])))"
+                );
+
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    GeometryCollection.Empty,
+                    "st_geomfromtext('GEOMETRYCOLLECTION EMPTY')"
+                );
+
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    new GeometryCollection(new IGeometry[]
+                    {
                         new Point(new Coordinate(1d, 1d)),
-                        new MultiPolygon(new[] {
+                        new MultiPolygon(new[]
+                        {
                             new Polygon(
-                                new LinearRing(new[] {
+                                new LinearRing(new[]
+                                {
                                     new Coordinate(1d, 1d),
                                     new Coordinate(2d, 2d),
                                     new Coordinate(3d, 3d),
@@ -150,31 +172,66 @@ namespace Npgsql.PluginTests
                                 })
                             )
                         })
-                    })
-                }),
-                CommandText = "st_collect(st_makepoint(1,1),st_collect(st_makepoint(1,1),st_multi(st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)])))))"
-            }
-        };
+                    }),
+                    "st_collect(st_makepoint(1,1),st_multi(st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)]))))"
+                );
 
-        [Test, TestCaseSource(nameof(Tests))]
-        public void TestRead(TestData data)
-        {
-            using (var conn = OpenConnection())
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT " + data.CommandText;
-                Assert.That(Equals(cmd.ExecuteScalar(), data.Geometry));
+                yield return new TestCaseData(
+                    Ordinates.None,
+                    new GeometryCollection(new IGeometry[]
+                    {
+                        new Point(new Coordinate(1d, 1d)),
+                        new GeometryCollection(new IGeometry[]
+                        {
+                            new Point(new Coordinate(1d, 1d)),
+                            new MultiPolygon(new[]
+                            {
+                                new Polygon(
+                                    new LinearRing(new[]
+                                    {
+                                        new Coordinate(1d, 1d),
+                                        new Coordinate(2d, 2d),
+                                        new Coordinate(3d, 3d),
+                                        new Coordinate(1d, 1d)
+                                    })
+                                )
+                            })
+                        })
+                    }),
+                    "st_collect(st_makepoint(1,1),st_collect(st_makepoint(1,1),st_multi(st_makepolygon(st_makeline(ARRAY[st_makepoint(1,1),st_makepoint(2,2),st_makepoint(3,3),st_makepoint(1,1)])))))"
+                );
+
+                yield return new TestCaseData(Ordinates.XYZ, new Point(1d, 2d, 3d), "st_makepoint(1,2,3)");
+
+                yield return new TestCaseData(
+                    Ordinates.XYZM,
+                    new Point(
+                        new DotSpatialAffineCoordinateSequence(new[] { 1d, 2d }, new[] { 3d }, new[] { 4d }),
+                        GeometryFactory.Default),
+                    "st_makepoint(1,2,3,4)"
+                );
             }
         }
 
-        [Test, TestCaseSource(nameof(Tests))]
-        public void TestWrite(TestData data)
+        [Test, TestCaseSource(nameof(TestCases))]
+        public void TestRead(Ordinates ordinates, IGeometry geometry, string sqlRepresentation)
         {
             using (var conn = OpenConnection())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.Parameters.AddWithValue("p1", data.Geometry);
-                cmd.CommandText = "SELECT st_asewkb(@p1) = st_asewkb(" + data.CommandText + ")";
+                cmd.CommandText = $"SELECT {sqlRepresentation}";
+                Assert.That(Equals(cmd.ExecuteScalar(), geometry));
+            }
+        }
+
+        [Test, TestCaseSource(nameof(TestCases))]
+        public void TestWrite(Ordinates ordinates, IGeometry geometry, string sqlRepresentation)
+        {
+            using (var conn = OpenConnection(handleOrdinates: ordinates))
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Parameters.AddWithValue("p1", geometry);
+                cmd.CommandText = $"SELECT st_asewkb(@p1) = st_asewkb({sqlRepresentation})";
                 Assert.That(cmd.ExecuteScalar(), Is.True);
             }
         }
@@ -182,7 +239,7 @@ namespace Npgsql.PluginTests
         [Test]
         public void TestArrayRead()
         {
-            using (var conn = OpenConnection())
+            using (var conn = OpenConnection(handleOrdinates: Ordinates.XY))
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "SELECT ARRAY(SELECT st_makepoint(1,1))";
@@ -195,7 +252,7 @@ namespace Npgsql.PluginTests
         [Test]
         public void TestArrayWrite()
         {
-            using (var conn = OpenConnection())
+            using (var conn = OpenConnection(handleOrdinates: Ordinates.XY))
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Parameters.AddWithValue("@p1", new[] { new Point(new Coordinate(1d, 1d)) });
@@ -207,7 +264,7 @@ namespace Npgsql.PluginTests
         [Test]
         public void ReadAsConcreteType()
         {
-            using (var conn = OpenConnection())
+            using (var conn = OpenConnection(handleOrdinates: Ordinates.XY))
             using (var cmd = new NpgsqlCommand("SELECT st_makepoint(1,1)", conn))
             using (var reader = cmd.ExecuteReader())
             {
@@ -221,7 +278,7 @@ namespace Npgsql.PluginTests
         public void RoundtripGeometryGeography()
         {
             var point = new Point(new Coordinate(1d, 1d));
-            using (var conn = OpenConnection())
+            using (var conn = OpenConnection(handleOrdinates: Ordinates.XY))
             {
                 conn.ExecuteNonQuery("CREATE TEMP TABLE data (geom GEOMETRY, geog GEOGRAPHY)");
                 using (var cmd = new NpgsqlCommand("INSERT INTO data (geom, geog) VALUES (@p, @p)", conn))

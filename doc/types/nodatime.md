@@ -26,11 +26,31 @@ NpgsqlConnection.GlobalTypeMapper.UseNodaTime();
 conn.TypeMapper.UseNodaTime();
 ```
 
+## Reading and Writing Values
+
+Once the plugin is set up, you can transparently read and write NodaTime objects:
+
+```c#
+// Write NodaTime Instant to PostgreSQL "timestamp without time zone"
+using (var cmd = new NpgsqlCommand(@"INSERT INTO mytable (my_timestamp) VALUES (@p)", conn))
+{
+    cmd.Parameters.Add(new NpgsqlParameter("p", Instant.FromUtc(2011, 1, 1, 10, 30)));
+    cmd.ExecuteNonQuery();
+}
+
+// Read timestamp back from the database as an Instant
+using (var cmd = new NpgsqlCommand(@"SELECT my_timestamp FROM mytable", conn))
+using (var reader = cmd.ExecuteReader())
+{
+    reader.Read();
+    var instant = reader.GetFieldValue<Instant>(0);
+}
+```
+
 ## Mapping Table
 
 > [!Warning]
-> A common mistake is for users to think that the PostgreSQL `timestamp with timezone` type stores the timezone in the database. This is not the case: only the t
-imestamp is stored. There is no single PostgreSQL type that stores both a date/time and a timezone, similar to [.NET DateTimeOffset](https://msdn.microsoft.com/en-us/library/system.datetimeoffset(v=vs.110).aspx).
+> A common mistake is for users to think that the PostgreSQL `timestamp with timezone` type stores the timezone in the database. This is not the case: only the timestamp is stored. There is no single PostgreSQL type that stores both a date/time and a timezone, similar to [.NET DateTimeOffset](https://msdn.microsoft.com/en-us/library/system.datetimeoffset(v=vs.110).aspx).
 
 PostgreSQL Type 		| Default NodaTime Type | Additional NodaTime Type      | Notes
 --------------------------------|-----------------------|-------------------------------|-------

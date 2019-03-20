@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using NpgsqlTypes;
 using NUnit.Framework;
@@ -302,6 +303,104 @@ namespace Npgsql.Tests
                     Assert.That(rdr.GetFieldValue<float>(2), Is.EqualTo(expected));
                 }
             }
+        }
+
+        [Test]
+        public void Bug1761()
+        {
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                Enlist = true,
+                Pooling = true,
+                MinPoolSize = 1,
+                MaxPoolSize = 1
+            }.ConnectionString;
+
+            for (var i = 0; i < 2; i++)
+            {
+                try
+                {
+                    using (var scope = new TransactionScope(TransactionScopeOption.Required, TimeSpan.FromMilliseconds(100)))
+                    {
+                        Thread.Sleep(1000);
+
+                        // Ambient transaction is now unusable, attempts to enlist to it will fail. We should recover
+                        // properly from this failure.
+
+                        using (var connection = OpenConnection(connString))
+                        using (var cmd = new NpgsqlCommand("SELECT 1", connection))
+                        {
+                            cmd.CommandText = "select 1;";
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        scope.Complete();
+                    }
+                }
+                catch (TransactionException)
+                {
+                    //do nothing
+                }
+            }
+        }
+
+        [Test]
+        public void Bug2274()
+        {
+            using (var conn = OpenConnection())
+            using (var cmd = new NpgsqlCommand("SELECT 1", conn))
+            {
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    ParameterName = "p",
+                    Direction = ParameterDirection.Output
+                });
+                using (var reader = cmd.ExecuteReader(CommandBehavior.SingleRow))
+                {
+                    Assert.That(() => reader.GetInt32(0), Throws.Exception.TypeOf<InvalidOperationException>());
+                    Assert.That(reader.Read(), Is.True);
+                    Assert.That(reader.GetInt32(0), Is.EqualTo(1));
+                    Assert.That(reader.Read(), Is.False);
+                }
+            }
+        }
+
+        [Test]
+        public void Bug2278()
+        {
+            using (var conn = OpenConnection())
+            {
+                try
+                {
+                    conn.ExecuteNonQuery("CREATE TYPE enum_type AS ENUM ('left', 'right')");
+                    conn.ExecuteNonQuery("CREATE DOMAIN enum_domain AS enum_type NOT NULL");
+                    conn.ExecuteNonQuery("CREATE TYPE composite_type AS (value enum_domain)");
+                    conn.ExecuteNonQuery("CREATE TEMP TABLE data (value composite_type)");
+                    conn.ExecuteNonQuery("INSERT INTO data (value) VALUES (ROW('left'))");
+
+                    conn.ReloadTypes();
+                    conn.TypeMapper.MapComposite<Bug2278CompositeType>("composite_type");
+                    conn.TypeMapper.MapEnum<Bug2278EnumType>("enum_type");
+
+                    conn.ExecuteScalar("SELECT * FROM data AS d");
+                }
+                finally
+                {
+                    conn.ExecuteNonQuery("DROP TABLE IF EXISTS data; DROP TYPE IF EXISTS composite_type; DROP DOMAIN IF EXISTS enum_domain; DROP TYPE IF EXISTS enum_type");
+                    conn.ReloadTypes();
+                }
+            }
+        }
+
+        class Bug2278CompositeType
+        {
+            public Bug2278EnumType Value { get; set; }
+        }
+
+        enum Bug2278EnumType
+        {
+            Left,
+            Right
         }
 
         #region Bug1285

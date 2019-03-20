@@ -1,4 +1,5 @@
 ﻿#region License
+
 // The PostgreSQL License
 //
 // Copyright (C) 2018 The Npgsql Development Team
@@ -19,17 +20,15 @@
 // AND FITNESS FOR A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED HEREUNDER IS
 // ON AN "AS IS" BASIS, AND THE NPGSQL DEVELOPMENT TEAM HAS NO OBLIGATIONS
 // TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+
 #endregion
 
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
-using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.Logging;
 using Npgsql.PostgresTypes;
@@ -80,13 +79,12 @@ namespace Npgsql.TypeMapping
 
         #region Construction
 
-        internal ConnectorTypeMapper(NpgsqlConnector connector)
+        internal ConnectorTypeMapper(NpgsqlConnector connector): base(GlobalTypeMapper.Instance.DefaultNameTranslator)
         {
             _connector = connector;
             UnrecognizedTypeHandler = new UnknownTypeHandler(_connector.Connection);
             ClearBindings();
             ResetMappings();
-            DefaultNameTranslator = GlobalTypeMapper.Instance.DefaultNameTranslator;
         }
 
         #endregion Constructors
@@ -270,7 +268,7 @@ namespace Npgsql.TypeMapping
                 BindType(dynamicCompositeFactory.Create(compType, _connector.Connection), compType);
         }
 
-        void BindType(NpgsqlTypeMapping mapping, NpgsqlConnector connector, bool throwOnError)
+        void BindType(NpgsqlTypeMapping mapping, NpgsqlConnector connector, bool externalCall)
         {
             // Binding can occur at two different times:
             // 1. When a user adds a mapping for a specific connection (and exception should bubble up to them)
@@ -285,7 +283,7 @@ namespace Npgsql.TypeMapping
             if (!found)
             {
                 var msg = $"A PostgreSQL type with the name {mapping.PgTypeName} was not found in the database";
-                if (throwOnError)
+                if (externalCall)
                     throw new ArgumentException(msg);
                 Log.Debug(msg);
                 return;
@@ -293,7 +291,7 @@ namespace Npgsql.TypeMapping
             else if (pgType == null)
             {
                 var msg = $"More than one PostgreSQL type was found with the name {mapping.PgTypeName}, please specify a full name including schema";
-                if (throwOnError)
+                if (externalCall)
                     throw new ArgumentException(msg);
                 Log.Debug(msg);
                 return;
@@ -301,7 +299,7 @@ namespace Npgsql.TypeMapping
             else if (pgType is PostgresDomainType)
             {
                 var msg = "Cannot add a mapping to a PostgreSQL domain type";
-                if (throwOnError)
+                if (externalCall)
                     throw new NotSupportedException(msg);
                 Log.Debug(msg);
                 return;
@@ -309,6 +307,17 @@ namespace Npgsql.TypeMapping
 
             var handler = mapping.TypeHandlerFactory.Create(pgType, connector.Connection);
             BindType(handler, pgType, mapping.NpgsqlDbType, mapping.DbTypes, mapping.ClrTypes);
+
+            if (!externalCall)
+                return;
+
+            foreach (var domain in DatabaseInfo.DomainTypes)
+                if (domain.BaseType.OID == pgType.OID)
+                {
+                    _byOID[domain.OID] = handler;
+                    if (domain.Array != null)
+                        BindType(handler.CreateArrayHandler(domain.Array), domain.Array);
+                }
         }
 
         void BindType(NpgsqlTypeHandler handler, PostgresType pgType, NpgsqlDbType? npgsqlDbType = null, DbType[] dbTypes = null, Type[] clrTypes = null)

@@ -115,7 +115,7 @@ namespace Npgsql.Tests
             }
         }
 
-        [Test]
+        [Test, Ignore("Flaky, see #2070")]
         public void WaitWithKeepalive()
         {
             var csb = new NpgsqlConnectionStringBuilder(ConnectionString)
@@ -162,7 +162,7 @@ namespace Npgsql.Tests
             {
                 conn.ExecuteNonQuery("LISTEN notifytest");
                 var cts = new CancellationTokenSource(1000);
-                Assert.That(async () => await conn.WaitAsync(cts.Token), Throws.Exception.TypeOf<TaskCanceledException>());
+                Assert.That(async () => await conn.WaitAsync(cts.Token), Throws.Exception.TypeOf<OperationCanceledException>());
                 Assert.That(conn.ExecuteScalar("SELECT 1"), Is.EqualTo(1));
             }
         }

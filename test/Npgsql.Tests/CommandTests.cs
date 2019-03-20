@@ -459,7 +459,9 @@ namespace Npgsql.Tests
 
                     using (var reader = cmd.ExecuteReader(CommandBehavior.SingleRow))
                     {
+                        Assert.That(() => reader.GetInt32(0), Throws.Exception.TypeOf<InvalidOperationException>());
                         Assert.That(reader.Read(), Is.True);
+                        Assert.That(reader.GetInt32(0), Is.EqualTo(1));
                         Assert.That(reader.Read(), Is.False);
                     }
                 }
@@ -527,7 +529,7 @@ namespace Npgsql.Tests
         public void GenericParameter()
         {
             using (var conn = OpenConnection())
-            using (var cmd = new NpgsqlCommand("SELECT @p1, @p2, @p3,@p4", conn))
+            using (var cmd = new NpgsqlCommand("SELECT @p1, @p2, @p3, @p4", conn))
             {
                 cmd.Parameters.Add(new NpgsqlParameter<int>("p1", 8));
                 cmd.Parameters.Add(new NpgsqlParameter<short>("p2", 8) { NpgsqlDbType = NpgsqlDbType.Integer });
@@ -818,19 +820,19 @@ namespace Npgsql.Tests
         }
 
         [Test]
-        public void InputAndOutputParameters()
+        [TestCase(CommandBehavior.Default)]
+        [TestCase(CommandBehavior.SequentialAccess)]
+        public void InputAndOutputParameters(CommandBehavior behavior)
         {
             using (var conn = OpenConnection())
-            using (var cmd = new NpgsqlCommand())
+            using (var cmd = new NpgsqlCommand("SELECT @c-1 AS c, @a+2 AS b", conn))
             {
-                cmd.Connection = conn;
-                cmd.CommandText = "Select :a + 2 as b, :c - 1 as c";
+                cmd.Parameters.Add(new NpgsqlParameter("a", 3));
                 var b = new NpgsqlParameter { ParameterName = "b", Direction = ParameterDirection.Output };
                 cmd.Parameters.Add(b);
-                cmd.Parameters.Add(new NpgsqlParameter("a", 3));
                 var c = new NpgsqlParameter { ParameterName = "c", Direction = ParameterDirection.InputOutput, Value = 4 };
                 cmd.Parameters.Add(c);
-                using (cmd.ExecuteReader())
+                using (cmd.ExecuteReader(behavior))
                 {
                     Assert.AreEqual(5, b.Value);
                     Assert.AreEqual(3, c.Value);

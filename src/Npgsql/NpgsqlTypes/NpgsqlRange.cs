@@ -256,8 +256,8 @@ namespace NpgsqlTypes
             if (!HasEquatableBounds)
                 return lowerBound?.Equals(upperBound) ?? false;
 
-            IEquatable<T> lower = (IEquatable<T>)lowerBound;
-            IEquatable<T> upper = (IEquatable<T>)upperBound;
+            var lower = (IEquatable<T>)lowerBound;
+            var upper = (IEquatable<T>)upperBound;
 
             return
                 !(lower?.Equals(default) ?? true) &&
@@ -341,7 +341,7 @@ namespace NpgsqlTypes
 
         /// <inheritdoc />
         public override int GetHashCode()
-            => unchecked((397 * (int)Flags) ^ (397 * LowerBound?.GetHashCode() ?? 0) ^ (397 * UpperBound?.GetHashCode() ?? 0));
+            => unchecked((397 * (int)Flags) ^ (397 * (LowerBound?.GetHashCode() ?? 0)) ^ (397 * (UpperBound?.GetHashCode() ?? 0)));
 
         /// <inheritdoc />
         public override string ToString()
